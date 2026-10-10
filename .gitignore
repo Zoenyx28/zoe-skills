@@ -1,0 +1,10 @@
+# 运行时产物与本机凭据，不进仓库
+cookies.txt
+config.json
+.work/
+bin/yt-dlp.exe
+
+__pycache__/
+*.pyc
+.DS_Store
+Thumbs.db

@@ -1,0 +1,806 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>bili-note · 实现原理与使用技巧</title>
+<style>
+  :root{
+    --pink:#fb7299; --pink-d:#e35c81; --blue:#00aeec; --blue-d:#0091c2;
+    --ink:#18191c; --ink-2:#61666d; --ink-3:#9499a0;
+    --bg:#f6f7f9; --card:#fff; --line:#e3e5e7;
+    --ok:#2fac66; --warn:#ff9f1c; --err:#f04b4b;
+    --mono:"Cascadia Mono","Consolas","SF Mono",Menlo,monospace;
+    --sans:"Microsoft YaHei","PingFang SC",-apple-system,"Segoe UI",sans-serif;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);
+       line-height:1.75;-webkit-font-smoothing:antialiased}
+
+  /* ---------- 顶部进度条 ---------- */
+  #bar{position:fixed;top:0;left:0;height:3px;width:0;z-index:99;
+       background:linear-gradient(90deg,var(--pink),var(--blue));
+       box-shadow:0 0 8px rgba(251,114,153,.5);transition:width .1s linear}
+
+  /* ---------- 通用 ---------- */
+  .wrap{max-width:940px;margin:0 auto;padding:0 22px}
+  section{padding:64px 0 8px}
+  h2{font-size:26px;margin:0 0 6px;letter-spacing:-.3px}
+  h2 .num{font-family:var(--mono);font-size:15px;color:var(--pink);
+          background:rgba(251,114,153,.1);border-radius:6px;padding:2px 8px;
+          margin-right:10px;vertical-align:2px}
+  h3{font-size:17px;margin:34px 0 8px}
+  .sub{color:var(--ink-3);font-size:14px;margin:0 0 26px}
+  p{margin:10px 0}
+  code{font-family:var(--mono);font-size:.9em;background:#eef0f3;
+       border-radius:4px;padding:1px 5px;color:var(--pink-d)}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;
+        padding:22px 24px;box-shadow:0 1px 3px rgba(0,0,0,.03)}
+  .muted{color:var(--ink-2)}
+
+  /* ---------- 进场动画 ---------- */
+  .rv{opacity:0;transform:translateY(22px);
+      transition:opacity .6s cubic-bezier(.2,.7,.3,1),transform .6s cubic-bezier(.2,.7,.3,1)}
+  .rv.on{opacity:1;transform:none}
+
+  /* ---------- HERO ---------- */
+  .hero{padding:90px 0 40px;text-align:center;position:relative;overflow:hidden}
+  .hero::before{content:"";position:absolute;inset:-40% -20% auto;height:520px;
+    background:radial-gradient(closest-side,rgba(251,114,153,.16),transparent 70%),
+               radial-gradient(closest-side,rgba(0,174,236,.13),transparent 70%);
+    background-position:28% 40%,72% 40%;background-repeat:no-repeat;
+    background-size:52% 80%;animation:drift 14s ease-in-out infinite alternate}
+  @keyframes drift{to{transform:translate3d(0,26px,0) scale(1.06)}}
+  .hero h1{font-size:clamp(34px,6vw,54px);margin:0;letter-spacing:-1.5px;
+           position:relative;background:linear-gradient(96deg,var(--pink),var(--blue));
+           -webkit-background-clip:text;background-clip:text;color:transparent}
+  .hero .tag{font-family:var(--mono);font-size:13px;color:var(--ink-3);
+             letter-spacing:2px;margin-bottom:14px}
+  .hero .desc{position:relative;color:var(--ink-2);font-size:17px;margin-top:14px}
+  .flowline{position:relative;display:inline-flex;align-items:center;gap:12px;
+            margin-top:30px;font-family:var(--mono);font-size:14px;flex-wrap:wrap;
+            justify-content:center}
+  .chip{background:#fff;border:1px solid var(--line);border-radius:999px;
+        padding:7px 16px;box-shadow:0 1px 3px rgba(0,0,0,.04)}
+  .chip.p{background:var(--pink);color:#fff;border-color:var(--pink)}
+  .chip.b{background:var(--blue);color:#fff;border-color:var(--blue)}
+  .arw{color:var(--ink-3);animation:nudge 1.6s ease-in-out infinite}
+  .arw:nth-of-type(2){animation-delay:.2s}
+  .arw:nth-of-type(4){animation-delay:.4s}
+  @keyframes nudge{0%,100%{transform:translateX(0);opacity:.45}50%{transform:translateX(4px);opacity:1}}
+
+  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));
+         gap:14px;margin-top:42px;position:relative}
+  .stat{background:#fff;border:1px solid var(--line);border-radius:12px;padding:16px 12px}
+  .stat b{display:block;font-family:var(--mono);font-size:24px;color:var(--pink)}
+  .stat span{font-size:12.5px;color:var(--ink-3)}
+
+  /* ---------- 分工 ---------- */
+  .split{display:grid;grid-template-columns:1fr 46px 1fr;gap:0;align-items:stretch}
+  .side{padding:20px 22px}
+  .side.script{background:linear-gradient(180deg,#f0f9ff,#fff);border-color:#bfe7fa}
+  .side.agent{background:linear-gradient(180deg,#fff0f5,#fff);border-color:#fbd0de}
+  .side h4{margin:0 0 4px;font-size:15px}
+  .side .who{font-family:var(--mono);font-size:11.5px;letter-spacing:1px;
+             text-transform:uppercase;color:var(--ink-3)}
+  .side ul{margin:10px 0 0;padding-left:18px;font-size:14px;color:var(--ink-2)}
+  .side li{margin:5px 0}
+  .bridge{display:flex;align-items:center;justify-content:center;position:relative}
+  .bridge::before{content:"";position:absolute;top:0;bottom:0;width:2px;
+                  background:linear-gradient(180deg,var(--blue),var(--pink))}
+  .dot{position:absolute;width:9px;height:9px;border-radius:50%;background:var(--pink);
+       box-shadow:0 0 0 4px rgba(251,114,153,.18);animation:travel 2.4s ease-in-out infinite}
+  @keyframes travel{0%{top:6%;opacity:0}12%{opacity:1}88%{opacity:1}100%{top:92%;opacity:0}}
+  @media(max-width:680px){
+    .split{grid-template-columns:1fr}
+    .bridge{height:46px}
+    .bridge::before{top:0;bottom:0;left:0;right:0;width:auto;height:2px;
+                    background:linear-gradient(90deg,var(--blue),var(--pink))}
+    .dot{animation:travelX 2.4s ease-in-out infinite}
+    @keyframes travelX{0%{left:6%;top:calc(50% - 4px);opacity:0}12%{opacity:1}
+                       88%{opacity:1}100%{left:92%;top:calc(50% - 4px);opacity:0}}
+  }
+
+  /* ---------- 管线 ---------- */
+  .pipe{position:relative;padding-left:34px}
+  .pipe::before{content:"";position:absolute;left:9px;top:8px;bottom:8px;width:2px;
+                background:linear-gradient(180deg,var(--blue) 0%,var(--pink) 100%);opacity:.28}
+  .step{position:relative;padding:9px 0}
+  .step .k{font-family:var(--mono);font-size:13.5px;color:#fff;background:var(--blue-d);
+           border-radius:6px;padding:2px 8px}
+  .step .side-note{color:var(--ink-3);font-size:13px}
+  .step::before{content:"";position:absolute;left:-30px;top:19px;width:11px;height:11px;
+                border-radius:50%;background:#fff;border:2.5px solid var(--blue);
+                transition:all .3s}
+  .step.pink::before{border-color:var(--pink)}
+  .step.on::before{background:var(--pink);border-color:var(--pink);
+                   box-shadow:0 0 0 5px rgba(251,114,153,.16)}
+
+  /* ---------- 演示台 ---------- */
+  .demo{background:#1b1d21;border-radius:14px;padding:20px 22px;color:#d7dae0;
+        font-family:var(--mono);font-size:13.5px;overflow:hidden}
+  .demo .hdr{display:flex;gap:7px;margin-bottom:14px}
+  .demo .hdr i{width:11px;height:11px;border-radius:50%;background:#3a3e45;display:block}
+  .demo .hdr i:first-child{background:#f0533f}
+  .demo .hdr i:nth-child(2){background:#f5c542}
+  .demo .hdr i:nth-child(3){background:#43c05a}
+  .cue{display:flex;gap:12px;padding:5px 0;border-bottom:1px solid rgba(255,255,255,.05);
+       transition:all .45s cubic-bezier(.2,.7,.3,1);overflow:hidden}
+  .cue .t{color:#5f6672;flex:0 0 52px}
+  .cue .x{flex:1;min-width:0}
+  .cue .del{color:#f0533f;opacity:0;transition:opacity .3s}
+  .cue.drop{max-height:0;opacity:0;padding:0;border-color:transparent}
+  .cue.prefix .x .kept{color:#43c05a}
+  .cue.prefix .x .gone{color:#f0533f;text-decoration:line-through;opacity:.55}
+  .cue.hot{background:rgba(0,174,236,.09);border-radius:5px}
+  .cue.hot .x{color:#9fd9f2}
+  .para-mark{margin:9px 0 0;padding:8px 12px;border-left:3px solid var(--pink);
+             background:rgba(251,114,153,.09);color:#f3b3c6;border-radius:0 6px 6px 0;
+             font-size:12.5px;animation:pop .4s ease both}
+  @keyframes pop{from{opacity:0;transform:translateX(-8px)}to{opacity:1;transform:none}}
+  .btn{appearance:none;border:0;border-radius:9px;padding:9px 20px;cursor:pointer;
+       font-family:var(--sans);font-size:14px;font-weight:600;color:#fff;
+       background:linear-gradient(96deg,var(--pink),var(--pink-d));
+       box-shadow:0 2px 10px rgba(251,114,153,.3);transition:transform .15s,box-shadow .15s}
+  .btn:hover{transform:translateY(-1px);box-shadow:0 4px 16px rgba(251,114,153,.4)}
+  .btn:active{transform:translateY(0)}
+  .btn.ghost{background:#fff;color:var(--ink);border:1px solid var(--line);box-shadow:none}
+  .btn.ghost:hover{border-color:var(--pink);color:var(--pink-d)}
+  .btnrow{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:14px 0 0}
+
+  /* ---------- 三道墙 ---------- */
+  .walls{display:grid;gap:12px}
+  .wall{display:flex;gap:14px;align-items:flex-start;background:#fff;border:1px solid var(--line);
+        border-left:4px solid var(--err);border-radius:10px;padding:14px 18px;
+        opacity:.35;transform:translateX(-14px);transition:all .5s cubic-bezier(.2,.7,.3,1)}
+  .wall.on{opacity:1;transform:none}
+  .wall .no{font-family:var(--mono);font-size:12px;color:#fff;background:var(--err);
+            border-radius:5px;padding:1px 7px;flex:0 0 auto;margin-top:3px}
+  .wall b{display:block;font-size:14.5px}
+  .wall span{font-size:13.5px;color:var(--ink-2)}
+  .pass{background:linear-gradient(96deg,#eafaf1,#f4fffa);border:1px solid #b7e6cc;
+        border-left:4px solid var(--ok);border-radius:10px;padding:16px 18px;
+        opacity:.35;transform:translateY(10px);transition:all .55s .1s cubic-bezier(.2,.7,.3,1)}
+  .pass.on{opacity:1;transform:none}
+
+  /* ---------- 事故链 ---------- */
+  .chain{display:flex;flex-wrap:wrap;gap:8px;align-items:center;font-family:var(--mono);font-size:12.5px}
+  .node{background:#fff;border:1px solid var(--line);border-radius:8px;padding:7px 11px;
+        color:var(--ink-2);transition:all .35s}
+  .node.hot{background:#fff0f2;border-color:var(--pink);color:var(--pink-d);
+            transform:translateY(-2px);box-shadow:0 3px 12px rgba(251,114,153,.22)}
+  .node.bad{background:var(--err);border-color:var(--err);color:#fff;
+            transform:translateY(-2px) scale(1.04);box-shadow:0 4px 16px rgba(240,75,75,.35)}
+  .node.good{background:var(--ok);border-color:var(--ok);color:#fff}
+  .sep{color:var(--ink-3)}
+
+  table{width:100%;border-collapse:collapse;font-size:14px;margin:12px 0}
+  th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--line)}
+  th{font-size:12.5px;color:var(--ink-3);font-weight:600;letter-spacing:.5px}
+  tbody tr{transition:background .2s}
+  tbody tr:hover{background:#fafbfc}
+  td.mono{font-family:var(--mono);font-size:13px}
+  .ok-t{color:var(--ok);font-weight:600}
+  .err-t{color:var(--err);font-weight:600}
+
+  /* ---------- 退出码 ---------- */
+  .codes{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px}
+  .code{background:#fff;border:1px solid var(--line);border-radius:11px;overflow:hidden;
+        cursor:pointer;transition:border-color .2s,box-shadow .2s}
+  .code:hover{border-color:#cfd3d8;box-shadow:0 2px 10px rgba(0,0,0,.05)}
+  .code .top{display:flex;align-items:center;gap:10px;padding:13px 16px}
+  .code .n{font-family:var(--mono);font-size:15px;font-weight:700;width:26px;height:26px;
+           border-radius:7px;display:grid;place-items:center;color:#fff;background:var(--ink-3)}
+  .code.c0 .n{background:var(--ok)} .code.c1 .n{background:var(--err)}
+  .code.c2 .n{background:var(--warn)} .code.c3 .n{background:var(--blue)}
+  .code.c4 .n{background:#8b6cef} .code.c5 .n{background:#7a8087}
+  .code.c6 .n{background:#d63384}
+  .code .nm{font-family:var(--mono);font-size:13.5px;color:var(--ink-2)}
+  .code .body{max-height:0;overflow:hidden;transition:max-height .35s ease;
+              border-top:1px solid transparent}
+  .code.open .body{max-height:260px;border-top-color:var(--line)}
+  .code .body p{margin:0;padding:13px 16px;font-size:13.5px;color:var(--ink-2)}
+
+  /* ---------- 目录树 ---------- */
+  pre.tree{background:#1b1d21;color:#c9ced6;border-radius:12px;padding:20px 22px;
+           font-family:var(--mono);font-size:13px;overflow-x:auto;line-height:1.85}
+  pre.tree .c{color:#5f6672}
+  pre.tree .hl{color:var(--pink)}
+  pre.tree .hl2{color:#5cc8f0}
+
+  /* ---------- 技巧清单 ---------- */
+  .tips{display:grid;gap:11px}
+  .tip{display:flex;gap:13px;background:#fff;border:1px solid var(--line);
+       border-radius:11px;padding:14px 17px;transition:transform .18s,border-color .18s}
+  .tip:hover{transform:translateX(3px);border-color:#cfd3d8}
+  .tip .ic{flex:0 0 24px;font-size:16px;line-height:1.5}
+  .tip b{font-size:14.5px;display:block;margin-bottom:2px}
+  .tip span{font-size:13.5px;color:var(--ink-2)}
+
+  footer{text-align:center;color:var(--ink-3);font-size:13px;padding:60px 0 50px}
+  footer code{background:#eef0f3}
+  .kbd{font-family:var(--mono);font-size:12px;background:#fff;border:1px solid var(--line);
+       border-bottom-width:2px;border-radius:5px;padding:1px 6px}
+</style>
+</head>
+<body>
+<div id="bar"></div>
+
+<!-- ============ HERO ============ -->
+<header class="hero">
+  <div class="wrap">
+    <div class="tag">CLAUDE CODE SKILL &nbsp;·&nbsp; ~/.claude/skills/bili-note</div>
+    <h1>bili-note</h1>
+    <p class="desc">把一条 B 站链接，变成一份按主题重组的<b>知识点笔记</b>。<br>
+       不是字幕转录 —— 是读完字幕之后重新组织过的要点。</p>
+
+    <div class="flowline">
+      <span class="chip">bilibili.com/video/BV…</span>
+      <span class="arw">➜</span>
+      <span class="chip b">脚本：抓 + 洗</span>
+      <span class="arw">➜</span>
+      <span class="chip p">agent：读 + 写</span>
+      <span class="arw">➜</span>
+      <span class="chip">P005 HCIA：TCP参考模型.md</span>
+    </div>
+
+    <div class="stats">
+      <div class="stat"><b>2</b><span>个脚本 · 867 行</span></div>
+      <div class="stat"><b>6</b><span>种退出码，各对应一个动作</span></div>
+      <div class="stat"><b>194</b><span>分P 也照样落一个目录</span></div>
+      <div class="stat"><b>0</b><span>次让 cookie 进对话</span></div>
+    </div>
+  </div>
+</header>
+
+<!-- ============ 1. 分工 ============ -->
+<section class="wrap rv">
+  <h2><span class="num">01</span>一条硬边界：谁做确定的事，谁做判断的事</h2>
+  <p class="sub">整个 skill 就建在这条线上。搞反了，两边都会坏。</p>
+
+  <div class="split card" style="padding:0;overflow:hidden">
+    <div class="side script">
+      <div class="who">bili_note.py</div>
+      <h4>确定性的事，交给脚本</h4>
+      <ul>
+        <li>查 BV / 分P 列表（<code>probe()</code>）</li>
+        <li>调 yt-dlp 下字幕</li>
+        <li>去滚动重复（<code>dedupe()</code>）</li>
+        <li>按停顿+字数切段（<code>paragraph()</code>）</li>
+        <li>把时间戳拼成可点链接</li>
+        <li>生成文件头、算落盘路径</li>
+      </ul>
+    </div>
+    <div class="bridge"><span class="dot"></span></div>
+    <div class="side agent">
+      <div class="who">你（Claude）</div>
+      <h4>要判断的事，交给 agent</h4>
+      <ul>
+        <li>读 <code>.work/</code> 里的稿子</li>
+        <li>判断哪句是知识点、哪句是口水</li>
+        <li>按主题分节（不按时间）</li>
+        <li>把口语改写成陈述句</li>
+        <li>决定哪里该加粗</li>
+        <li>把链接<b>原样搬</b>进笔记</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:14px;border-left:4px solid var(--pink)">
+    <b>为什么这条线不能挪</b>
+    <p class="muted" style="margin-bottom:0">
+      脚本没有任何办法知道「传输层」是一个小节标题、「套娃可以」是一句废话。
+      反过来，agent 每次手算 <code>mm:ss → 秒</code> 都会算错几个 ——
+      所以链接由脚本拼好，agent 只负责搬运。<b>让每个人只做自己不会错的事。</b>
+    </p>
+  </div>
+</section>
+
+<!-- ============ 2. 管线 ============ -->
+<section class="wrap rv">
+  <h2><span class="num">02</span>管线全景</h2>
+  <p class="sub">点任意一步看细节。蓝色是脚本，粉色是 agent。</p>
+
+  <div class="card">
+    <div class="pipe" id="pipe">
+      <div class="step" data-d="把 BV 号从链接里抠出来（<code>BV[0-9A-Za-z]{10}</code>）。<code>b23.tv</code> 短链先跟一次跳转。拿不到就 <code>die</code>。">
+        <span class="k">resolve_bvid</span> <span class="side-note">从链接里认 BV 号</span></div>
+      <div class="step" data-d="只打 <code>/x/web-interface/view</code> 这一个只读端点 —— 无签名、无鉴权、不需要 cookie。拿回标题、UP主、以及 <code>pages[]</code>（每集的 page / part / cid）。<br><br>刻意<b>不</b>在这里解析字幕：字幕那一份风险（wbi 签名 / 风控 / 页面改版）全留在 yt-dlp 身上，脚本里不存在第二条要维护的解析路径。">
+        <span class="k">probe</span> <span class="side-note">查视频信息 + 分P 列表</span></div>
+      <div class="step" data-d="多P 且链接带了 <code>?p=5</code> → 就等于用户已经选好了，直接用。<br><br>只在多P 时认这个参数：单P 链接上的 <code>p</code> 是噪音，拿去喂 <code>--playlist-items</code> 可能选出空集。">
+        <span class="k">选 P</span> <span class="side-note">?p=N 或 --pages</span></div>
+      <div class="step" data-d="<code>shutil.rmtree(.work)</code> → 重建 → <code>tempfile.mkdtemp()</code> 做下载目录。<br><br>跑完 <code>finally</code> 里删掉临时目录，输出目录里只会留下 md。">
+        <span class="k">清 .work</span> <span class="side-note">每跑一次整个清空</span></div>
+      <div class="step" data-d="<code>--skip-download --write-subs --sub-langs all --sub-format srt</code>。<br><br>喂进去的 URL <b>一定先摘掉 <code>?p=</code></b>（<code>strip_page_param()</code>）—— 分P 只由 <code>--playlist-items</code> 表达，两个一起给会出事故。">
+        <span class="k">fetch_subs</span> <span class="side-note">yt-dlp 下字幕（.srt）</span></div>
+      <div class="step" data-d="从文件名认 P 号，两个来源：序号前缀 <code>004_…</code>（正常路径）、id 里的 <code>_p4</code> 后缀（备用）。<br><br><b>认不出来返回 None，绝不返回 1。</b>">
+        <span class="k">page_of</span> <span class="side-note">认这一份字幕属于哪一集</span></div>
+      <div class="step" data-d="先按 <code>--sub-langs all</code> 拿到的所有语言排序：<b>中文人工 &gt; 中文 AI &gt; 其它</b>。挑出来的那条决定后续一切。">
+        <span class="k">pick_lang</span> <span class="side-note">中文人工 &gt; 中文 AI &gt; 其它</span></div>
+      <div class="step" data-d="解析 SRT → <code>dedupe()</code> 去滚动重复 → <code>paragraph()</code> 切段。<br><br>实测这条视频：979 条 cue → 去重后 976 条 → 切成 <b>80 段</b> / 15635 字。">
+        <span class="k">parse → dedupe → paragraph</span> <span class="side-note">洗稿三连</span></div>
+      <div class="step" data-d="每段拼一条现成的链接：<code>…/BV1LokeBhE69?p=5&t=1827</code>，时间戳由 <code>fmt_ts()</code> 算。<br><br>写成 <code>.work/P005 HCIA：TCP参考模型.md</code> —— 这份是<b>原料</b>，不是成品。">
+        <span class="k">build_transcript</span> <span class="side-note">挂时间戳 → 写进 .work/</span></div>
+      <div class="step pink" data-d="脚本读一遍输出目录，看有没有旧文件认领：文件名 + 旧文件头里的 <code>- BV：</code> 和 <code>- 分P：</code> 两行比对，返回 <code>overwrite</code> / <code>renamed</code> / <code>new</code>。">
+        <span class="k">resolve_path</span> <span class="side-note">算落盘路径（认领旧文件）</span></div>
+      <div class="step pink" data-d="读稿子，按主题分节、改写成要点、把链接原样搬，用 Write 工具写到 <code>save_to</code>。<br><br>完成标准：<b>稿子里每一段都能指向笔记里的某一条要点，或者你能说清它为什么是纯口水。</b>">
+        <span class="k">你写笔记</span> <span class="side-note">读稿 → 总结 → 落盘</span></div>
+    </div>
+    <div class="btnrow">
+      <button class="btn ghost" id="playpipe">▶ 走一遍管线</button>
+      <span class="muted" style="font-size:13px">（也可以直接点某一步看它做什么）</span>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 3. 洗稿 ============ -->
+<section class="wrap rv">
+  <h2><span class="num">03</span>洗稿：把滚动字幕变成能读的稿子</h2>
+  <p class="sub">三个动作，每个都踩过坑。</p>
+
+  <h3>① 去滚动重复 — <code>dedupe()</code></h3>
+  <p class="muted">B 站滚动字幕是<b>累积式</b>的：后一条把前一条整个带上，只多几个字。
+     如果原样读，你会看到「大家好」「大家好我是」「大家好我是徐哥」—— 同一句话读三遍。</p>
+
+  <div class="demo" id="d-dedupe">
+    <div class="hdr"><i></i><i></i><i></i></div>
+    <div id="dedupe-body"></div>
+  </div>
+  <div class="btnrow">
+    <button class="btn" data-run="dedupe">▶ 演示去重</button>
+    <button class="btn ghost" data-reset="dedupe">↻ 还原</button>
+  </div>
+  <p class="muted" style="font-size:13.5px">
+    规则：<code>len(prev_full) &gt;= 4</code> 才做前缀剥离 —— 否则「好」→「好的」这种短句会被误吃掉。
+    只在前一条够长时才动手，这一条是必须的。
+  </p>
+
+  <h3>② 切段 — <code>paragraph()</code></h3>
+  <p class="muted">两个信号，<b>哪个先到就断</b>：停顿 &gt; 1.5 秒，或者累积字数 &gt; 150。</p>
+
+  <div class="card" style="border-left:4px solid var(--err);margin-bottom:12px">
+    <b>⚠ 别改成只看停顿</b>
+    <p class="muted" style="margin-bottom:0">
+      实测 B 站 AI 字幕 <b>103 条 cue 里 101 个间隔是 0</b> —— 它是一条没有停顿的连续流。
+      只看停顿，整条视频会粘成一块几千字的墙。<b>字数上限才是这类内容唯一可靠的断段信号。</b>
+    </p>
+  </div>
+
+  <div class="demo" id="d-para">
+    <div class="hdr"><i></i><i></i><i></i></div>
+    <div id="para-body"></div>
+  </div>
+  <div class="btnrow">
+    <button class="btn" data-run="para">▶ 演示切段</button>
+    <button class="btn ghost" data-reset="para">↻ 还原</button>
+  </div>
+
+  <h3>③ 挂链接 — 由脚本拼，agent 搬运</h3>
+  <p class="muted">
+    每段前面拼一条 <code>[13:00](…?p=5&amp;t=780)</code>。
+    <code>mm:ss</code> 换算成秒很容易算错，所以这件事不交给 agent。
+    现实里我自己手打链接时就写出过 <code>BV1LokeBhE69&amp;p=5</code>（少一个 <code>?</code>）——
+    这就是为什么「原样搬」是条硬规则，不是建议。
+  </p>
+</section>
+
+<!-- ============ 4. 登录 ============ -->
+<section class="wrap rv">
+  <h2><span class="num">04</span>为什么登录只能扫码</h2>
+  <p class="sub">三条路都被堵死了，只剩这一条。</p>
+
+  <div class="walls" id="walls">
+    <div class="wall"><span class="no">墙 1</span>
+      <div><b>读浏览器 cookie —— 解不开</b>
+        <span>这台机器的 Edge 是 155，cookie 用 <b>App-Bound Encryption (v20)</b> 加密；
+        yt-dlp 的 <code>WindowsChromeCookieDecryptor</code> 只支持 v10 (DPAPI)。版本对不上，读出来是乱码。</span></div></div>
+    <div class="wall"><span class="no">墙 2</span>
+      <div><b>直接读浏览器凭据库 —— 被策略拦</b>
+        <span>去翻 <code>Cookies</code> / <code>Local State</code> 会被 Claude Code 的
+        <b>Credential Exploration</b> 策略拦住。实测被拦了两次，没有绕。</span></div></div>
+    <div class="wall"><span class="no">墙 3</span>
+      <div><b>让用户把 SESSDATA 贴进对话 —— 不可接受</b>
+        <span>那等于把登录凭据写进对话历史。<b>这条从一开始就不在选项里。</b></span></div></div>
+  </div>
+
+  <div class="pass" id="passbox" style="margin-top:14px">
+    <b>✓ 剩下的路：扫码</b>
+    <p class="muted" style="margin:8px 0 0;font-size:13.5px">
+      全程不碰浏览器存储。<code>login.py</code> 生成二维码 → 渲染成<b>本地 HTML</b> 用默认浏览器打开 →
+      轮询 <code>/x/passport-login/web/qrcode/poll</code> → 成功后把 cookie 写成
+      yt-dlp 能吃的 Netscape 格式。
+    </p>
+  </div>
+
+  <div class="card" style="margin-top:14px">
+    <b>两个容易写错的地方</b>
+    <table>
+      <tr><th style="width:34%">坑</th><th>怎么处理</th></tr>
+      <tr><td>直接 <code>os.startfile(url)</code></td>
+          <td>那个 url 是<b>二维码载荷</b>，本身是个移动端单页 —— 浏览器打开只会看到「App 登录页」。
+              必须先渲成本地 HTML 再开。</td></tr>
+      <tr><td>只从一处收 cookie</td>
+          <td>要收两处：poll 响应里的 <code>Set-Cookie</code>，<b>和</b> <code>data.url</code> 那条
+              crossDomain URL 的 query（值还是 URL-encoded 的，得 <code>unquote</code>）。
+              只认一处，另一处形态一变就静默失败。</td></tr>
+      <tr><td>用 <code>MozillaCookieJar</code> 读回文件</td>
+          <td>它按<b>系统默认编码</b>打开文件，这台机器是 GBK，文件里任何非 ASCII 字节都抛
+              <code>UnicodeDecodeError</code>，而且 <code>load()</code> 不收 encoding 参数，绕不开。
+              → 自己解析 Netscape 格式。</td></tr>
+      <tr><td>解析出来的值没 <code>strip()</code></td>
+          <td>每行 split 出来的值带着行尾换行，拼出的 Cookie 头里含 <code>\n</code>，
+              <code>http.client</code> 直接抛异常 —— 被上层 <code>except</code> 吞掉，
+              就成了一个<b>假的「未登录」</b>。</td></tr>
+    </table>
+  </div>
+</section>
+
+<!-- ============ 5. 落盘 ============ -->
+<section class="wrap rv">
+  <h2><span class="num">05</span>落盘认领：文件头里的两行是身份证</h2>
+  <p class="sub">文件名只能告诉你「叫什么」，不能告诉你「是哪一集」。</p>
+
+  <p class="muted">同一个多P 视频的 194 集<b>共用一个 BV</b>。如果只用文件名匹配，
+     P5 和 P5 之外的任何一集都可能撞上同一个 <code>.md</code>，然后把对方原地覆盖掉。</p>
+
+  <div class="card">
+    <table>
+      <tr><th style="width:34%">情况</th><th>结果</th></tr>
+      <tr><td>同 BV + 同分P 重跑</td><td class="mono"><span class="ok-t">overwrite</span> —— 覆盖原来那份（这是期望行为）</td></tr>
+      <tr><td>同 BV、不同分P</td><td class="mono">不会互相认领 —— <code>- 分P：P5</code> 对不上 <code>- 分P：P4</code></td></tr>
+      <tr><td>别的 BV 撞了同名</td><td class="mono"><span class="ok-t">renamed</span> —— 退化成 <code>&lt;标题&gt;-&lt;BV&gt;.md</code></td></tr>
+      <tr><td>单P 文件</td><td class="mono">要求<b>没有</b> <code>- 分P：</code> 这一行才算匹配</td></tr>
+    </table>
+  </div>
+
+  <div class="card" style="margin-top:14px;border-left:4px solid var(--pink)">
+    <b>所以 <code>header</code> 由脚本生成、agent 原样粘贴</b>
+    <p class="muted" style="margin-bottom:0">
+      <code>- BV：</code> 和 <code>- 分P：</code> 这两行是认领的依据。让 agent 手拼，
+      它迟早会把这两行写歪 —— 代价是<b>静默覆盖掉另一集的笔记</b>。SKILL.md 里那句
+      「原样粘贴，一个字都别改」不是格式要求，是安全机制。
+    </p>
+  </div>
+</section>
+
+<!-- ============ 6. 事故复盘 ============ -->
+<section class="wrap rv">
+  <h2><span class="num">06</span>事故复盘：<code>?p=4</code> 覆盖掉了真正的 P1</h2>
+  <p class="sub">2026-10-10。这份 skill 里最重要的一次教训。</p>
+
+  <table>
+    <tr><th>喂给 yt-dlp 的 URL</th><th>产出的文件</th><th><code>playlist_index</code></th></tr>
+    <tr><td class="mono">…/BV1LokeBhE69/?p=4</td><td class="mono err-t">NA_BV1LokeBhE69_p4.srt</td><td class="mono err-t">None → 渲染成 NA</td></tr>
+    <tr><td class="mono">…/BV1LokeBhE69/ + <code>--playlist-items 4</code></td><td class="mono ok-t">004_BV1LokeBhE69_p4.srt</td><td class="mono ok-t">4 ✓</td></tr>
+  </table>
+  <p class="muted">两个参数表达的是同一件事，但<b>只有后者保住了 P 号</b>。</p>
+
+  <div class="card" style="margin-top:16px">
+    <b>事故链</b>
+    <div class="chain" id="chain" style="margin-top:12px">
+      <span class="node" data-i="0">URL 带 ?p=4</span><span class="sep">→</span>
+      <span class="node" data-i="1">yt-dlp 当成单视频</span><span class="sep">→</span>
+      <span class="node" data-i="2">playlist_index = None</span><span class="sep">→</span>
+      <span class="node" data-i="3">文件名成 NA_…_p4.srt</span><span class="sep">→</span>
+      <span class="node" data-i="4">正则 (\d+)_ 匹配失败</span><span class="sep">→</span>
+      <span class="node" data-i="5">兜底：{1: srts}</span><span class="sep">→</span>
+      <span class="node" data-i="6">认领了真的 P1</span><span class="sep">→</span>
+      <span class="node" data-i="7">覆盖</span>
+    </div>
+    <div class="btnrow">
+      <button class="btn" id="replay">▶ 重放事故</button>
+      <button class="btn ghost" id="reset-chain">↻ 重置</button>
+    </div>
+    <p class="muted" style="font-size:13.5px;margin-bottom:0">
+      第 5 步是真正的成因。那句兜底是 <code>if not by_index: by_index = {1: srts}</code> ——
+      它把<b>「识别失败」翻译成了「这是第 1 集」</b>。数量核对也放行了：想要 1 集、拿到 1 集，通过。
+    </p>
+  </div>
+
+  <h3>三条修复</h3>
+  <div class="tips">
+    <div class="tip"><span class="ic">🧹</span><div>
+      <b><code>strip_page_param()</code> — 喂给 yt-dlp 前先摘掉 <code>?p=</code></b>
+      <span>分P 只由 <code>--playlist-items</code> 表达。两个不能同时给。</span></div></div>
+    <div class="tip"><span class="ic">🚫</span><div>
+      <b><code>page_of()</code> 认不出来就返回 <code>None</code></b>
+      <span>绝不返回 1。「认不出」和「这是第 1 集」是两件事，代码里不能长得一样。</span></div></div>
+    <div class="tip"><span class="ic">🛑</span><div>
+      <b>删掉兜底，改成 <code>die(code=6)</code> + 集合比对</b>
+      <span>多出来的 P → 停（串号了，危险）；少了的 P → 只 warn（那一集本来就没字幕，不危险）。
+      这个区分是刻意的：不能因为一集没字幕就让整批停工。</span></div></div>
+  </div>
+
+  <div class="card" style="margin-top:14px;border-left:4px solid var(--warn)">
+    <b>最该记住的一条</b>
+    <p class="muted" style="margin-bottom:0">
+      我当时<b>已经</b>在 SKILL.md 里写下了正确的警告（「会渲染成 NA…静默归到第 1 集」），
+      但代码里的兜底没删。<b>文档写对了不等于代码做对了。</b><br>
+      更普适的：<b>「贴心的兜底」是危险源。</b>一个把失败路径静默翻译成默认值的 fallback，
+      比直接报错危险得多 —— 报错你会看见，兜底你不会。
+    </p>
+  </div>
+</section>
+
+<!-- ============ 7. 退出码 ============ -->
+<section class="wrap rv">
+  <h2><span class="num">07</span>退出码就是协议</h2>
+  <p class="sub">脚本用退出码告诉 agent「现在该干什么」，不是「出错了」。点开看处置。</p>
+
+  <div class="codes" id="codes">
+    <div class="code c0"><div class="top"><span class="n">0</span><span class="nm">ok</span></div>
+      <div class="body"><p>读 <code>results</code>，逐个写笔记。有 <code>warnings</code> 就一并告诉用户。</p></div></div>
+    <div class="code c1"><div class="top"><span class="n">1</span><span class="nm">error</span></div>
+      <div class="body"><p>把 <code>message</code> 原样转述给用户。</p></div></div>
+    <div class="code c2"><div class="top"><span class="n">2</span><span class="nm">need_config</span></div>
+      <div class="body"><p>还没设过输出目录。问用户 md 想存哪，再跑 <code>set-output-dir</code>。</p></div></div>
+    <div class="code c3"><div class="top"><span class="n">3</span><span class="nm">need_login</span></div>
+      <div class="body"><p>没有 <code>cookies.txt</code>。先跑第 0 步扫码登录。</p></div></div>
+    <div class="code c4"><div class="top"><span class="n">4</span><span class="nm">need_page_choice</span></div>
+      <div class="body"><p>多P 视频没选集。把 <code>pages</code> 列给用户选，再带 <code>--pages</code> 重跑。</p></div></div>
+    <div class="code c5"><div class="top"><span class="n">5</span><span class="nm">no_subtitle</span></div>
+      <div class="body"><p>没有可提取的字幕轨。<b>陷阱：登录态失效也会长这样</b> —— 先跑
+        <code>login.py --status</code> 确认再下结论。</p></div></div>
+    <div class="code c6"><div class="top"><span class="n">6</span><span class="nm">page_mismatch</span></div>
+      <div class="body"><p>拿回的 P 号和要的对不上，<b>什么都没写</b>。转述 <code>message</code>，
+        别自作主张换 <code>--pages</code> 重试。</p></div></div>
+  </div>
+</section>
+
+<!-- ============ 8. 技巧 ============ -->
+<section class="wrap rv">
+  <h2><span class="num">08</span>使用技巧</h2>
+  <p class="sub">按「什么时候会用到」排。</p>
+
+  <div class="tips">
+    <div class="tip"><span class="ic">🔗</span><div>
+      <b>链接自带 <code>?p=N</code>，就不用再给 <code>--pages</code></b>
+      <span>直接 <code>/bili-note &lt;带 p=5 的链接&gt;</code> 就行，脚本会自己认。
+      只在多P 时认这个参数。</span></div></div>
+
+    <div class="tip"><span class="ic">📚</span><div>
+      <b>一次抓多集：<code>--pages 3-5</code> / <code>--pages 1,3,5</code></b>
+      <span>支持区间和列表。某一集没字幕只会 warn，其余照常写 —— 不会因为一集拖垮整批。</span></div></div>
+
+    <div class="tip"><span class="ic">✂️</span><div>
+      <b>稿子太碎或太整，调 <code>config.json</code></b>
+      <span><code>max_para_chars</code>（默认 150）调大 → 段更粗；调小 → 断点更密。
+      <code>pause_threshold</code>（默认 1.5 秒）管停顿。只影响你看稿时的断点，不影响内容。</span></div></div>
+
+    <div class="tip"><span class="ic">⚠️</span><div>
+      <b><code>.work/</code> 每次 <code>run</code> 会<b>整个清空</b></b>
+      <span>先把稿子读完再重跑。重跑一次，上一批稿子就没了 —— 得重新抓。</span></div></div>
+
+    <div class="tip"><span class="ic">🔑</span><div>
+      <b>怀疑登录态：<code>login.py --status</code></b>
+      <span>返回 <code>expired</code> 就重扫，不用改任何配置。别去猜。</span></div></div>
+
+    <div class="tip"><span class="ic">🔄</span><div>
+      <b>字幕突然全抓不到 → 换 <code>bin/yt-dlp.exe</code></b>
+      <span>多半是 B 站改版。从 yt-dlp 官方 releases 下同名文件覆盖即可，脚本不用动。</span></div></div>
+
+    <div class="tip"><span class="ic">🔒</span><div>
+      <b>绝不让用户把 cookie / SESSDATA 贴进对话</b>
+      <span>这是硬规则。诊断时也只打印 cookie 的<b>名字</b>，不打印值。</span></div></div>
+
+    <div class="tip"><span class="ic">✍️</span><div>
+      <b>写笔记必须用 Write 工具</b>
+      <span>这台机器是 GBK 环境，走 bash heredoc 写中文会乱码。另外整个流程不要用 Bash 的
+      <code>echo</code> 写中文 md。</span></div></div>
+
+    <div class="tip"><span class="ic">🎨</span><div>
+      <b>别只抄字幕，要总结成知识点</b>
+      <span>衡量标准：稿子里每一段都能指向笔记里的某一条要点，或者你能说清它为什么是纯口水。
+      80 段稿子收敛成 50 来条要点是正常的 —— 远少于这个数是跳段了，远多于就是没在总结。</span></div></div>
+  </div>
+</section>
+
+<!-- ============ 9. 目录 ============ -->
+<section class="wrap rv">
+  <h2><span class="num">09</span>目录结构</h2>
+<pre class="tree">~/.claude/skills/bili-note/
+├── <span class="hl2">SKILL.md</span>              <span class="c"># 给 agent 的说明书：分工、退出码、硬规则</span>
+├── scripts/
+│   ├── <span class="hl2">bili_note.py</span>        <span class="c"># 抓取 + 洗稿（574 行）—— 不写笔记</span>
+│   ├── <span class="hl2">login.py</span>            <span class="c"># 扫码登录 → cookies.txt（293 行）</span>
+│   └── vendor/qrcodegen.py  <span class="c"># 二维码编码，只在登录时才 import</span>
+├── bin/yt-dlp.exe           <span class="c"># 抓取引擎（B 站改版时换这个）</span>
+├── <span class="hl">cookies.txt</span>            <span class="c"># 登录态（Netscape 格式，扫码后才有）</span>
+├── <span class="hl">config.json</span>            <span class="c"># 输出目录 + 切段阈值</span>
+├── <span class="hl">.work/</span>                 <span class="c"># 洗完的稿子，agent 读这里 —— 每次 run 清空</span>
+└── how-it-works.html        <span class="c"># ← 你正在看的这页</span>
+
+D:\notes\bili-notes\          <span class="c"># 输出目录（config.json 里配，这是示例值），只有 md</span>
+├── P001 2026新版华为认证学习大纲.md
+├── P002 网工学习大礼包.md
+├── P004 HCIA：OSI参考模型.md
+└── P005 HCIA：TCP参考模型.md</pre>
+</section>
+
+<footer class="wrap">
+  bili-note · 写于 2026-10-10<br>
+  一句话总结：<b>让脚本做它不会错的事，让 agent 做只有它能做的事，让失败看起来像失败。</b>
+</footer>
+
+<script>
+/* ---------- 滚动进度条 ---------- */
+const bar = document.getElementById('bar');
+addEventListener('scroll', () => {
+  const h = document.documentElement.scrollHeight - innerHeight;
+  bar.style.width = (h > 0 ? scrollY / h * 100 : 0) + '%';
+}, {passive:true});
+
+/* ---------- 进场 ---------- */
+const io = new IntersectionObserver(es => {
+  es.forEach(e => { if (e.isIntersecting) { e.target.classList.add('on'); io.unobserve(e.target); } });
+}, {threshold:.12});
+document.querySelectorAll('.rv').forEach(el => io.observe(el));
+
+/* ---------- 管线：点击展开 + 顺序播放 ---------- */
+const steps = [...document.querySelectorAll('#pipe .step')];
+steps.forEach(s => {
+  s.style.cursor = 'pointer';
+  s.addEventListener('click', () => {
+    const open = s.dataset.open === '1';
+    steps.forEach(o => {
+      if (o.dataset.open === '1') { o.dataset.open = '0'; const d = o.querySelector('.detail'); if (d) d.remove(); }
+    });
+    s.classList.toggle('on', !open);
+    if (!open) {
+      s.dataset.open = '1';
+      const d = document.createElement('div');
+      d.className = 'detail';
+      d.style.cssText = 'font-size:13.5px;color:var(--ink-2);background:#fafbfc;border-left:3px solid var(--blue);border-radius:0 8px 8px 0;padding:12px 15px;margin:8px 0 4px;line-height:1.8';
+      d.innerHTML = s.dataset.d;
+      s.appendChild(d);
+    } else { s.dataset.open = '0'; }
+  });
+});
+document.getElementById('playpipe').addEventListener('click', () => {
+  steps.forEach(s => s.classList.remove('on'));
+  steps.forEach((s, i) => setTimeout(() => s.classList.add('on'), i * 170));
+});
+
+/* ---------- 洗稿演示 ---------- */
+const CUES = [
+  {t:'00:00', s:2.0,  x:'大家好'},
+  {t:'00:01', s:3.0,  x:'大家好我是'},
+  {t:'00:02', s:3.4,  x:'大家好我是徐哥'},
+  {t:'00:04', s:5.6,  x:'今天我们来讲TCP/IP参考模型'},
+  {t:'00:07', s:12.1, x:'那么OSI它只是起一个参考作用的'},
+  {t:'00:10', s:13.0, x:'那么OSI它只是起一个参考作用的现在广泛使用的是TCP/IP'},
+  {t:'00:14', s:26.4, x:'我们可以在什么地方看到呢'},
+  {t:'00:17', s:27.0, x:'我们可以在什么地方看到呢就比如说我改我的网卡属性'},
+  {t:'00:22', s:28.9, x:'就会发现里面显示的就是TCP/IPv4'},
+];
+const box = document.getElementById('dedupe-body');
+let timers = [];
+function clearT(){ timers.forEach(clearTimeout); timers = []; }
+
+function renderDedupe(animate){
+  clearT(); box.innerHTML = '';
+  CUES.forEach((c, i) => {
+    const row = document.createElement('div');
+    row.className = 'cue'; row.dataset.i = i;
+    row.innerHTML = `<span class="t">[${c.t}]</span><span class="x">${c.x}</span>`;
+    box.appendChild(row);
+  });
+  if (!animate) return;
+  const rows = [...box.children];
+  // 逐条判定：后一条是否以前一条开头（且前一条够长）
+  CUES.forEach((c, i) => {
+    if (i === 0) return;
+    const prev = CUES[i-1];
+    const cumulative = c.x.startsWith(prev.x) && prev.x.length >= 4;
+    timers.push(setTimeout(() => {
+      const r = rows[i];
+      if (cumulative) {
+        const kept = c.x.slice(prev.x.length);
+        r.classList.add('prefix');
+        r.querySelector('.x').innerHTML =
+          `<span class="gone">${prev.x}</span><span class="kept">${kept}</span>`;
+      } else {
+        r.querySelector('.x').insertAdjacentHTML('beforeend',
+          ' <span class="del">← 独立片段，原样保留</span>');
+      }
+    }, (i) * 420));
+  });
+  // 第 2 步：把重复的整条标出来
+  timers.push(setTimeout(() => {
+    // 上面「大家好我是徐哥」被剥成「徐哥」；「大家好我是」剥成「我是」
+    // 给出统计
+    const m = document.createElement('div');
+    m.className = 'para-mark';
+    m.textContent = '9 条 cue → 去重后 9 条独立片段（3 条累积式被剥成增量，0 条整条重复）';
+    box.appendChild(m);
+  }, CUES.length * 420 + 300));
+}
+
+function renderPara(animate){
+  clearT(); box.innerHTML = '';
+  CUES.forEach((c, i) => {
+    const row = document.createElement('div');
+    row.className = 'cue'; row.dataset.i = i;
+    const gap = i === 0 ? 0 : (c.s - CUES[i-1].s);
+    row.innerHTML = `<span class="t">[${c.t}]</span><span class="x">${c.x.slice(0,26)}…</span>
+                     <span style="color:#5f6672;flex:0 0 auto">Δ${gap.toFixed(1)}s</span>`;
+    box.appendChild(row);
+  });
+  if (!animate) return;
+  const rows = [...box.children];
+  let acc = 0;
+  const MAX = 40;   // 演示用的小阈值；真实脚本是 150 字
+  CUES.forEach((c, i) => {
+    const gap = i === 0 ? 0 : (c.s - CUES[i-1].s);
+    acc += c.x.length;
+    const byPause = gap > 1.5;
+    const byChars = acc > MAX;
+    const brk = byPause || byChars;
+    const reason = byPause
+      ? `✂ 停顿 ${gap.toFixed(1)}s &gt; 1.5s → 断段`
+      : (byChars ? `✂ 累积 ${acc} 字 &gt; ${MAX}（真实阈值 150）→ 断段` : '');
+    timers.push(setTimeout(() => {
+      rows[i].classList.add('hot');
+      if (brk) {
+        const m = document.createElement('div');
+        m.className = 'para-mark';
+        m.innerHTML = reason;
+        rows[i].after(m);
+        acc = 0;
+      }
+      if (i === CUES.length - 1) {
+        const m = document.createElement('div');
+        m.className = 'para-mark';
+        m.textContent = '↑ 两条规则哪个先到就用哪个断 —— 停顿只是辅助，字数才是主力';
+        box.appendChild(m);
+      }
+    }, i * 520));
+  });
+}
+
+document.querySelectorAll('[data-run]').forEach(b => b.addEventListener('click', () => {
+  b.dataset.run === 'dedupe' ? renderDedupe(true) : renderPara(true);
+}));
+document.querySelectorAll('[data-reset]').forEach(b => b.addEventListener('click', () => {
+  b.dataset.reset === 'dedupe' ? renderDedupe(false) : renderPara(false);
+}));
+renderDedupe(false); renderPara(false);
+
+/* ---------- 三道墙 ---------- */
+const wallIo = new IntersectionObserver(es => {
+  es.forEach(e => {
+    if (!e.isIntersecting) return;
+    const walls = [...document.querySelectorAll('#walls .wall')];
+    walls.forEach((w, i) => setTimeout(() => w.classList.add('on'), i * 320));
+    setTimeout(() => document.getElementById('passbox').classList.add('on'), walls.length * 320 + 260);
+    wallIo.disconnect();
+  });
+}, {threshold:.4});
+wallIo.observe(document.getElementById('walls'));
+
+/* ---------- 事故重放 ---------- */
+const chain = [...document.querySelectorAll('#chain .node')];
+function playChain(){
+  chain.forEach(n => n.className = 'node');
+  chain.forEach((n, i) => setTimeout(() => {
+    n.classList.add(i <= 4 ? 'hot' : 'bad');
+  }, i * 620));
+}
+document.getElementById('replay').addEventListener('click', playChain);
+document.getElementById('reset-chain').addEventListener('click', () =>
+  chain.forEach(n => n.className = 'node'));
+const chainIo = new IntersectionObserver(es => {
+  es.forEach(e => { if (e.isIntersecting) { setTimeout(playChain, 400); chainIo.disconnect(); } });
+}, {threshold:.5});
+chainIo.observe(document.getElementById('chain'));
+
+/* ---------- 退出码手风琴 ---------- */
+document.querySelectorAll('.code').forEach(c => c.addEventListener('click', () => {
+  const was = c.classList.contains('open');
+  document.querySelectorAll('.code').forEach(o => o.classList.remove('open'));
+  if (!was) c.classList.add('open');
+}));
+</script>
+</body>
+</html>

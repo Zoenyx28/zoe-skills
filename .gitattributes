@@ -1,0 +1,4 @@
+# 一律用 LF：脚本是 Python，笔记是 markdown，别让 Windows 的 CRLF 到处乱窜
+* text=auto eol=lf
+*.exe binary
+*.png binary
